@@ -77,7 +77,12 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
      * - Replace unresolvable links with wiki-link-missing spans
      */
     protected normalizeRenderedLinks(el: HTMLElement, sourcePath = ''): void {
+        const allowedIds = new Set(this.resolvablePages.values());
         el.querySelectorAll('a[data-page]').forEach((a) => {
+            if (!allowedIds.has(a.getAttribute('data-page') || '')) {
+                this.replaceWithMissingLink(a as HTMLAnchorElement, a.getAttribute('data-page') || '');
+                return;
+            }
             a.removeAttribute('target');
             a.removeAttribute('rel');
             a.removeAttribute('style');
@@ -149,57 +154,52 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
 
         const el = document.body.createDiv();
 
-        await hooks?.beforeMarkdownRender?.();
-        const renderResult = await this.renderMarkdownSafely(processedContent, el, sourcePath);
-        await hooks?.afterMarkdownRender?.(renderResult, el);
+        try {
+            await hooks?.beforeMarkdownRender?.();
+            const renderResult = await this.renderMarkdownSafely(processedContent, el, sourcePath);
+            await hooks?.afterMarkdownRender?.(renderResult, el);
 
-        if (this.settings.disableSyntaxHighlighting !== false) {
-            restoreLanguageIdentifiers(el);
+            if (this.settings.disableSyntaxHighlighting !== false) {
+                restoreLanguageIdentifiers(el);
+            }
+            await hooks?.afterLanguageRestore?.(el);
+
+            el.querySelectorAll('.copy-code-button').forEach((e) => {
+                e.remove();
+            });
+
+            this.measureContentSizes(el, {
+                noteLabel: noteLabelFromPath(sourcePath),
+                diagramSources: extractDiagramSources(markdownContent),
+            });
+
+            await hooks?.beforeImageProcessing?.(el);
+            await this.processImagesInElement(el, hooks?.imageHooks, hooks?.onImageProcessed);
+            await hooks?.afterImageProcessing?.(el);
+
+            await hooks?.beforeNormalizeLinks?.(el);
+            this.normalizeRenderedLinks(el, sourcePath);
+
+            await hooks?.beforeHeadingIds?.(el);
+            let html = el.innerHTML;
+            html = this.addHeadingIds(html, this.context.pageId(sourcePath));
+
+            // Note: Restoration script is added globally in generateWikiHtml, not per-page
+
+            return html;
+        } finally {
+            el.remove();
         }
-        await hooks?.afterLanguageRestore?.(el);
-
-        el.querySelectorAll('.copy-code-button').forEach((e) => {
-            e.remove();
-        });
-
-        this.measureContentSizes(el, {
-            noteLabel: noteLabelFromPath(sourcePath),
-            diagramSources: extractDiagramSources(markdownContent),
-        });
-
-        await hooks?.beforeImageProcessing?.(el);
-        await this.processImagesInElement(el, hooks?.imageHooks, hooks?.onImageProcessed);
-        await hooks?.afterImageProcessing?.(el);
-
-        await hooks?.beforeNormalizeLinks?.(el);
-        this.normalizeRenderedLinks(el, sourcePath);
-
-        await hooks?.beforeHeadingIds?.(el);
-        let html = el.innerHTML;
-        html = this.addHeadingIds(html);
-
-        // Note: Restoration script is added globally in generateWikiHtml, not per-page
-
-        return html;
     }
 
-    protected addHeadingIds(html: string): string {
-        const idCounter: Record<string, number> = {};
-        
-        return html.replace(/<h([123])[^>]*>([^<]+)<\/h\1>/g, (_match, level, text) => {
-            let baseId = text
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/^-+|-+$/g, '');
-            
-            if (!idCounter[baseId]) {
-                idCounter[baseId] = 0;
-            }
-            idCounter[baseId]++;
-            const id = idCounter[baseId] === 1 ? baseId : `${baseId}-${idCounter[baseId]}`;
-            
-            return `<h${level} id="${id}">${text}</h${level}>`;
+    protected addHeadingIds(html: string, pageId: string): string {
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        container.querySelectorAll('h1, h2, h3').forEach((heading, index) => {
+            const label = this.linkResolver.slugify(heading.textContent || '') || 'heading';
+            heading.id = `heading-${pageId}-${index + 1}-${label}`;
         });
+        return container.innerHTML;
     }
 
     private generateWikiHtml(centralFile: TFile, renderedPages: Map<string, string>, pageList = this.pageList): string {

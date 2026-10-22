@@ -106,7 +106,7 @@ function generateTOC() {
         if (!id) return;
         var text = (heading.textContent || '').trim();
         var level = heading.tagName.toLowerCase();
-        tocHTML += '<li><a href="#' + id + '" class="' + level + '" data-target="' + id + '">' + text + '</a></li>';
+        tocHTML += '<li><a href="#' + id + '" class="' + level + '" data-target="' + id + '">' + escapeText(text) + '</a></li>';
     });
 
     tocHTML += '</ul>';
@@ -198,7 +198,7 @@ function setupEffects() {
         const currentNote = state.notes.find(n => n.slug === state.currentPage.value);
         if (bc) {
             bc.innerHTML = currentNote
-                ? '<a href="javascript:void(0)" data-page="' + currentNote.slug + '">' + currentNote.title + '</a>'
+                ? '<a href="javascript:void(0)" data-page="' + currentNote.slug + '">' + escapeText(currentNote.title) + '</a>'
                 : '';
         }
     });

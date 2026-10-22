@@ -60,8 +60,8 @@ async function exportFixture(folder: boolean, exclude = false, sharePointMode = 
     const { app, byPath } = mockAppWithFiles({
         '42. Areas/Work/행정가.md': 'UNRELATED_BODY_ONLY',
         [rootPath]: '[[연구가|First]] [[연구나|Second]] [[없는노트]]',
-        [a]: '<h1>BODY_A_ONLY</h1> [[연구나]]',
-        [b]: '<h1>BODY_B_ONLY</h1> [[연구가]]',
+        [a]: '<h1>BODY_A_ONLY</h1><h2>관찰 변수</h2> [[연구나]]',
+        [b]: '<h1>BODY_B_ONLY</h1><h2>관찰 변수</h2> [[연구가]]',
     });
     const orch = new WikiExportOrchestrator(app, new Component(), options);
     const notes = await orch.collectNotes(byPath.get(rootPath)!);
@@ -73,6 +73,15 @@ async function exportFixture(folder: boolean, exclude = false, sharePointMode = 
 }
 
 describe('anonymized regression fixtures', () => {
+    it('collects relative and URL-encoded Markdown links with punctuation and Unicode', async () => {
+        const { app, byPath } = mockAppWithFiles({
+            '한글/Root.md': '[first](../English/Note.md) [second](%EC%97%B0%EA%B5%AC%20%281%29.md) [[DAVIS 연구]]',
+            'English/Note.md': '', '한글/연구 (1).md': '', 'DAVIS 연구.md': '',
+        });
+        const orch = new WikiExportOrchestrator(app, new Component(), options);
+        const notes = await orch.collectNotes(byPath.get('한글/Root.md')!);
+        expect(notes.map(n => n.path).sort()).toEqual([...byPath.keys()].sort());
+    });
     it.each([false, true])('keeps two Korean bodies distinct; folder=%s', async folder => {
         const { html, notes, pages, a, b, rootPath } = await exportFixture(folder);
         expect(notes.map(n => n.path).sort()).toEqual([rootPath, a, b].sort());
@@ -85,6 +94,9 @@ describe('anonymized regression fixtures', () => {
         expect(ids).toHaveLength(3);
         expect(new Set(ids).size).toBe(3);
         expect(ids).not.toContain('page-');
+        const headingIds = [...document.querySelectorAll('h1, h2')].map(el => el.id);
+        expect(headingIds.every(Boolean)).toBe(true);
+        expect(new Set(headingIds).size).toBe(headingIds.length);
         for (const link of document.querySelectorAll('[data-page]')) {
             expect(ids).toContain('page-' + link.getAttribute('data-page'));
         }
