@@ -1,7 +1,8 @@
+import { exportDocumentMetadata, exportFilename } from '../utils/exportCompatibility';
 import { App, Notice, TFile } from 'obsidian';
 import type AdvancedHtmlExportPlugin from '../main';
 import HtmlRenderer from '../utils/htmlRenderer';
-import { downloadBlob, generateSafeFilename } from '../utils/fileUtils';
+import { downloadBlob } from '../utils/fileUtils';
 import { wrapHtmlForExportWithMeta, resolveCompressionMode } from '../utils/selfExtract';
 import { ExportSizeLedger } from '../utils/exportSizeLedger';
 import { createNoteArtifact, utf8ByteLength } from '../utils/exportSizeReport';
@@ -38,9 +39,10 @@ export class ExportSingleFileCommand {
       return;
     }
 
+    let progressNotice: Notice | undefined;
     try {
       // Show progress notice
-      const progressNotice = new Notice('Exporting file as HTML...', 0);
+      progressNotice = new Notice('Exporting file as HTML...', 0);
 
       // Read file content
       const content = await this.app.vault.cachedRead(activeFile);
@@ -74,11 +76,12 @@ export class ExportSingleFileCommand {
       const { html: outputHtml, meta } = wrapHtmlForExportWithMeta(
         fullHtml,
         compression,
-        activeFile.basename
+        this.plugin.settings.sharePointMode ? activeFile.basename + ' - Exported' : activeFile.basename,
+        this.plugin.settings
       );
       ledger.applyCompression(meta);
-      const blob = new Blob([outputHtml], { type: 'text/html' });
-      const filename = generateSafeFilename(activeFile.path, 'html');
+      const blob = new Blob([outputHtml], { type: 'text/html;charset=utf-8' });
+      const filename = exportFilename(activeFile.path, false, this.plugin.settings);
 
       downloadBlob(blob, filename);
 
@@ -94,6 +97,8 @@ export class ExportSingleFileCommand {
       console.error('Error exporting file:', error);
       const msg = error instanceof Error ? error.message : String(error);
       new Notice(`Failed to export file: ${msg}`);
+    } finally {
+      progressNotice?.hide();
     }
   }
 
@@ -104,8 +109,10 @@ export class ExportSingleFileCommand {
    * @returns Complete HTML document as string
    */
   private createHtmlDocument(content: string, title: string): string {
+    const metadata = exportDocumentMetadata(title + ' - Exported', this.plugin.settings);
     return fillTemplate(singleFileTemplate, {
-      TITLE: title,
+      TITLE: metadata.titleHtml,
+      LANGUAGE: metadata.language,
       STYLES: singleFileStyles,
       CONTENT: content,
     });

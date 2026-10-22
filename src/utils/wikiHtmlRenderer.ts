@@ -1,3 +1,4 @@
+import { exportDocumentMetadata, type SharePointOptions } from './exportCompatibility';
 import { App, Component, TFile } from 'obsidian';
 import HtmlRenderer, { type ImageProcessingHooks, type RenderMarkdownResult } from './htmlRenderer';
 import { extractDiagramSources, noteLabelFromPath } from './exportSizeInstrumentation';
@@ -13,7 +14,7 @@ import signals from './wikiTemplates/signals.js?raw';
 import helpers from './wikiTemplates/helpers.js?raw';
 import appTemplate from './wikiTemplates/app.js?raw';
 
-export interface WikiRenderOptions {
+export interface WikiRenderOptions extends SharePointOptions {
     imageQuality: 'high' | 'medium' | 'low';
     enableLazyLoading: boolean;
     enableImageDeduplication: boolean;
@@ -203,7 +204,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
 
     private generateWikiHtml(centralFile: TFile, renderedPages: Map<string, string>, pageList = this.pageList): string {
         const options = this.settings as WikiRenderOptions;
-        const wikiTitle = options.wikiTitle || centralFile.basename;
+        const metadata = exportDocumentMetadata(options.wikiTitle || centralFile.basename, options);
         const defaultTheme = options.defaultTheme || 'light';
         const centralSlug = pageList.length > 0 ? pageList[0].slug : 'central';
         const pagesJson = JSON.stringify(pageList).replace(/</g, '\\u003c');
@@ -233,7 +234,8 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         }
 
         return fillTemplate(template, {
-            WIKI_TITLE: escapeHtml(wikiTitle),
+            WIKI_TITLE: metadata.titleHtml,
+            LANGUAGE: metadata.language,
             DEFAULT_THEME: defaultTheme,
             STYLES: styles,
             CONTENT: this.getWikiHtmlStructure(renderedPages, pageList),
@@ -378,7 +380,8 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
 
     private buildExportManifest(centralFile: TFile): string {
         const options = this.settings as WikiRenderOptions;
-        const wikiTitle = options.wikiTitle || centralFile.basename;
+        const metadata = exportDocumentMetadata(options.wikiTitle || centralFile.basename, options);
+        const wikiTitle = metadata.title;
         const fm = this.app.metadataCache.getFileCache(centralFile)?.frontmatter ?? {};
         const manifest: Record<string, string> = {};
         manifest.title = (fm.title as string) || wikiTitle;

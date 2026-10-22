@@ -18,9 +18,14 @@ type BooleanSettingKey =
   | 'showExportStatistics'
   | 'enableThemeToggle'
   | 'enableInlineTOC'
-  | 'disableSyntaxHighlighting';
+  | 'disableSyntaxHighlighting'
+  | 'sharePointMode'
+  | 'sharePointRemoveExportedSuffix'
+  | 'sharePointNumericTitle'
+  | 'sharePointUtf8Bom';
 
-type TextSettingKey = 'wikiTitle' | 'exportAuthor' | 'syntaxHighlightLanguages';
+type TextSettingKey = 'wikiTitle' | 'exportAuthor' | 'syntaxHighlightLanguages'
+  | 'sharePointLanguage' | 'sharePointTitle' | 'sharePointFilename';
 
 type DropdownSettingKey = 'imageQuality' | 'exportCompression' | 'defaultTheme';
 
@@ -115,6 +120,15 @@ class AdvancedHtmlExportSettingTab extends PluginSettingTab {
     this.addToggle('Disable syntax highlighting', 'Export code blocks as plain text without syntax highlighting (faster export, smaller file size)', 'disableSyntaxHighlighting');
 
     this.addText('Languages for syntax highlighting', 'Comma-separated list of language identifiers to process. Custom blocks (mermaid, plantuml, etc.) are NOT affected.', 'syntaxHighlightLanguages', 'javascript, typescript, python, ...');
+
+    this.addHeading('SharePoint compatibility');
+    this.addToggle('Enable SharePoint compatibility', 'Apply the options below to exported HTML. Verify title display and opening behavior in your SharePoint library.', 'sharePointMode');
+    this.addToggle('Remove Exported suffix', 'Remove a trailing " - Exported" from the HTML title when compatibility mode is enabled.', 'sharePointRemoveExportedSuffix');
+    this.addToggle('Encode non-ASCII title characters', 'Write numeric character references in the HTML title. The displayed title stays readable.', 'sharePointNumericTitle');
+    this.addToggle('Add UTF-8 BOM', 'Add a UTF-8 byte order mark to the downloaded HTML file.', 'sharePointUtf8Bom');
+    this.addText('Document language', 'Root HTML language in compatibility mode (for example ko or en-US). Empty or invalid values use en.', 'sharePointLanguage', 'ko');
+    this.addText('HTML display title', 'Optional title override in compatibility mode. Leave empty to use the normal title. This does not rename the download.', 'sharePointTitle');
+    this.addText('Download filename', 'Optional filename in compatibility mode. Leave empty to use the note filename. The .html extension is added automatically.', 'sharePointFilename');
 
     // Debug section
     this.addHeading('Developer options');

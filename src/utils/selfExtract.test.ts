@@ -153,3 +153,17 @@ describe('resolveCompressionMode', () => {
         expect(resolveCompressionMode(true, 'gzipb64')).toBe('gzipb64');
     });
 });
+
+
+describe('SharePoint compressed containers', () => {
+    it.each<PayloadEncoding>(['base64', 'base85'])('preserves the exact inner document and accounts for BOM with %s', encoding => {
+        const inner = '<!DOCTYPE html><html lang="ko"><head><title>&#50672;&#44396;</title></head><body><script>const text = "한국어";</script><img src="data:image/png;base64,AAAA"></body></html>';
+        const { html, meta } = buildGzipSelfExtractWithMeta(inner, '연구 - Exported', encoding, { sharePointMode: true });
+        expect(html.charCodeAt(0)).toBe(0xfeff);
+        expect(html).toContain('<html lang="ko">');
+        expect(html).toContain('<title>&#50672;&#44396;</title>');
+        expect(gunzipSync(extractPayload(html)).toString('utf8')).toBe(inner);
+        expect(meta.outputBytes).toBe(Buffer.byteLength(html));
+        expect(meta.rawBytes).toBe(Buffer.byteLength(inner));
+    });
+});

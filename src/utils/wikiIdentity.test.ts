@@ -52,7 +52,7 @@ describe('path identity and navigation IDs', () => {
     });
 });
 
-async function exportFixture(folder: boolean, exclude = false) {
+async function exportFixture(folder: boolean, exclude = false, sharePointMode = false) {
     const prefix = folder ? '30. Research/' : '';
     const rootPath = prefix + (folder ? '38. Lab Meeting/' : '') + 'Meeting.md';
     const a = prefix + '연구가.md';
@@ -66,7 +66,7 @@ async function exportFixture(folder: boolean, exclude = false) {
     const orch = new WikiExportOrchestrator(app, new Component(), options);
     const notes = await orch.collectNotes(byPath.get(rootPath)!);
     orch.setSelectedNotes(notes.filter(n => !exclude || n.path !== b));
-    const renderer = new DetailedWikiRenderer(app, new Component(), options);
+    const renderer = new DetailedWikiRenderer(app, new Component(), { ...options, sharePointMode });
     const pages = await orch.renderNotesWithProgress(renderer, new CancellationToken(), new PauseController(), () => {});
     const html = renderer.generateWikiHtmlWithRenderedPages(byPath.get(rootPath)!, pages, orch.getSelectedNotes());
     return { html, notes, pages, a, b, rootPath, selected: orch.getSelectedNotes() };
@@ -89,8 +89,8 @@ describe('anonymized regression fixtures', () => {
             expect(ids).toContain('page-' + link.getAttribute('data-page'));
         }
     });
-    it('actually switches each Korean page using exported click handlers in a DOM simulation', async () => {
-        const { html, notes, a, b } = await exportFixture(false);
+    it.each([false, true])('switches each Korean page using exported click handlers; SharePoint=%s', async mode => {
+        const { html, notes, a, b } = await exportFixture(false, false, mode);
         document.documentElement.innerHTML = html;
         const script = document.querySelector('body script')!.textContent!;
         runInNewContext(script, { document, window, location: window.location, history: window.history,

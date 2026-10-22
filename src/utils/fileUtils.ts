@@ -34,7 +34,7 @@ export function sanitizeFilename(filename: string): string {
  * @returns Safe filename with extension
  */
 export function generateSafeFilename(filePath: string, extension: string = 'html'): string {
-  const baseName = filePath.split('/').pop()?.split('.')[0] || 'untitled';
+  const baseName = filePath.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'untitled';
   const sanitized = sanitizeFilename(baseName);
   return `${sanitized}.${extension}`;
 }

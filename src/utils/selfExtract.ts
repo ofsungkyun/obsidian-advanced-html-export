@@ -1,5 +1,5 @@
+import { addExportBom, exportDocumentMetadata, type SharePointOptions } from './exportCompatibility';
 import { gzipSync } from 'zlib';
-import { escapeHtml } from './htmlUtils';
 
 /**
  * Compression applied to an exported HTML file before it is delivered.
@@ -152,13 +152,14 @@ const GZIP_LOADER = String.raw`(function () {
 })();`;
 
 /** Builds the surrounding HTML shell for a self-extracting export. */
-function buildContainer(title: string, body: string): string {
+function buildContainer(title: string, body: string, options: SharePointOptions): string {
+    const metadata = exportDocumentMetadata(title, options);
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${metadata.language}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
+<title>${metadata.titleHtml}</title>
 <style>${CONTAINER_STYLE}</style>
 </head>
 <body>
@@ -182,13 +183,14 @@ export function buildGzipSelfExtractWithMeta(
     html: string,
     title: string,
     encoding: PayloadEncoding,
+    options: SharePointOptions = {},
 ): { html: string; meta: CompressionMeta } {
     const input = textEncoder.encode(html);
     const compressed = gzipSync(input, { level: 9 });
     const payload = encoding === 'base64' ? encodeBase64(compressed) : encodeBase85(compressed);
     const body = `<script id="zz-payload" type="application/octet-stream" data-encoding="${encoding}" data-bytes="${compressed.length}">${payload}</script>
 <script>${GZIP_LOADER}</script>`;
-    const container = buildContainer(title, body);
+    const container = addExportBom(buildContainer(title, body, options), options);
     const encodedBytes = textEncoder.encode(payload).length;
     return {
         html: container,
@@ -215,13 +217,15 @@ export function wrapHtmlForExportWithMeta(
     html: string,
     mode: CompressionMode,
     title: string,
+    options: SharePointOptions = {},
 ): { html: string; meta: CompressionMeta } {
     if (mode === 'gzipb64') {
-        return buildGzipSelfExtractWithMeta(html, title, 'base64');
+        return buildGzipSelfExtractWithMeta(html, title, 'base64', options);
     }
     if (mode === 'gzipb85') {
-        return buildGzipSelfExtractWithMeta(html, title, 'base85');
+        return buildGzipSelfExtractWithMeta(html, title, 'base85', options);
     }
+    html = addExportBom(html, options);
     const rawBytes = textEncoder.encode(html).length;
     return {
         html,

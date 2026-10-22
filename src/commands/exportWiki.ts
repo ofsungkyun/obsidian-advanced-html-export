@@ -1,3 +1,4 @@
+import { exportFilename } from '../utils/exportCompatibility';
 import { runWithProgress } from '../utils/renderLifecycle';
 import { App, Notice, TFile } from 'obsidian';
 import type AdvancedHtmlExportPlugin from '../main';
@@ -6,7 +7,7 @@ import { WikiExportOrchestrator, NoteInfo, ExportMetrics } from '../utils/wikiEx
 import { ExportPreviewModal } from '../ui/modals/ExportPreviewModal';
 import { NoteSelectionModal } from '../ui/modals/NoteSelectionModal';
 import { RenderingProgressModal } from '../ui/modals/RenderingProgressModal';
-import { downloadBlob, sanitizeFilename } from '../utils/fileUtils';
+import { downloadBlob } from '../utils/fileUtils';
 import { wrapHtmlForExportWithMeta, resolveCompressionMode, type CompressionMode } from '../utils/selfExtract';
 import { ExportSizeLedger } from '../utils/exportSizeLedger';
 import { createNoteArtifact } from '../utils/exportSizeReport';
@@ -122,6 +123,7 @@ export class ExportWikiCommand {
     /** Builds the render options shared by the orchestrator and the renderer. */
     private buildRenderOptions(): WikiRenderOptions {
         return {
+            ...this.plugin.settings,
             imageQuality: this.plugin.settings.imageQuality,
             enableLazyLoading: this.plugin.settings.enableLazyLoading,
             enableImageDeduplication: this.plugin.settings.enableImageDeduplication,
@@ -163,12 +165,13 @@ export class ExportWikiCommand {
         const { html: outputHtml, meta } = wrapHtmlForExportWithMeta(
             htmlContent,
             this.resolveCompression(file),
-            containerTitle
+            containerTitle,
+            this.plugin.settings
         );
         ledger.applyCompression(meta);
 
         const filename = this.generateWikiFilename(file.path);
-        downloadBlob(new Blob([outputHtml], { type: 'text/html' }), filename);
+        downloadBlob(new Blob([outputHtml], { type: 'text/html;charset=utf-8' }), filename);
         new Notice(`Wiki exported as ${filename}`);
 
         if (this.plugin.settings.showExportStatistics) {
@@ -216,8 +219,6 @@ export class ExportWikiCommand {
     }
 
     private generateWikiFilename(filePath: string): string {
-        const baseName = filePath.split('/').pop()?.split('.')[0] || 'wiki';
-        const sanitized = sanitizeFilename(baseName);
-        return `${sanitized}-wiki.html`;
+        return exportFilename(filePath, true, this.plugin.settings);
     }
 }
