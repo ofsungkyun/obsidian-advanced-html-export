@@ -1,3 +1,4 @@
+import { WikiExportContext } from './wikiExportContext';
 import { App, Component, TFile } from 'obsidian';
 import { LinkResolver } from './linkResolver';
 import { WikiLinkCollector } from './wikiLinkCollector';
@@ -72,6 +73,10 @@ export class WikiExportOrchestrator {
     this.options = options;
     this.linkResolver = new LinkResolver();
     this.collector = new WikiLinkCollector(this.app, this.linkResolver);
+  }
+
+  getContext(): WikiExportContext {
+    return this.collector.context;
   }
 
   getStage(): ExportStage {
@@ -155,7 +160,7 @@ export class WikiExportOrchestrator {
         
         return {
           file,
-          slug: this.linkResolver.getFileSlug(file),
+          slug: this.getContext().pageId(file.path),
           title: frontmatter.title ?? file.basename,
           path: file.path,
           depth,
@@ -208,6 +213,9 @@ export class WikiExportOrchestrator {
 
     const renderedPages = new Map<string, string>();
 
+    renderer.setExportContext(this.getContext());
+    renderer.setResolvablePages(this.selectedNotes);
+
     // Subscribe to renderer events
     renderer.onRenderEvent(onEvent);
 
@@ -223,7 +231,7 @@ export class WikiExportOrchestrator {
 
         try {
           const html = await renderer.renderPageWithProgress(noteInfo.file, token, pauseController);
-          renderedPages.set(noteInfo.slug, html);
+          renderedPages.set(noteInfo.path, html);
         } catch (error) {
           if (error instanceof CancellationError) {
             this.stage = 'cancelled';

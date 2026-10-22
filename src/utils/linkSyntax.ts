@@ -17,7 +17,7 @@ export function wikiLinkPattern(): RegExp {
  * Captures group 1 = text, group 2 = target. Fresh regex per call.
  */
 export function markdownLinkPattern(): RegExp {
-  return /\[([^\]]+)\]\(([^)]+)\)/g;
+  return /\[([^\]]+)\]\((<[^>]+>|(?:[^()\n]|\([^()\n]*\))+)\)/g;
 }
 
 /** Matches markdown images and captures the target: `![alt](target)`. */
@@ -32,8 +32,7 @@ export function markdownImageTargetPattern(): RegExp {
 export function isExternalLink(target: string): boolean {
   return (
     target.startsWith('#') ||
-    target.startsWith('http://') ||
-    target.startsWith('https://') ||
-    target.startsWith('mailto:')
+    /^[a-z][a-z0-9+.-]*:/i.test(target) ||
+    target.startsWith('//')
   );
 }

@@ -120,3 +120,8 @@ export function arrayBufferToBase64(_buffer: ArrayBuffer): string {
 }
 
 export default {};
+
+export function parseLinktext(text: string): { path: string; subpath: string } {
+  const index = text.indexOf('#');
+  return index < 0 ? { path: text, subpath: '' } : { path: text.slice(0, index), subpath: text.slice(index) };
+}

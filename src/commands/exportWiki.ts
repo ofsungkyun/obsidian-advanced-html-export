@@ -91,7 +91,7 @@ export class ExportWikiCommand {
             // Record per-note artifacts (excluding inline images, which are
             // listed separately) for the largest-artifacts ranking.
             for (const note of selectedNotes) {
-                const pageHtml = renderedPages.get(note.slug);
+                const pageHtml = renderedPages.get(note.path);
                 if (pageHtml !== undefined) {
                     ledger.recordArtifact(createNoteArtifact(note.title, pageHtml));
                 }

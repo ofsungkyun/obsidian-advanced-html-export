@@ -234,7 +234,7 @@ describe('Direct links to viewable files', () => {
             const slugs = slugsOf(orch);
             expect(slugs.sort()).toEqual(['central', slug].sort());
 
-            const page = rendered.get(slug);
+            const page = rendered.get(file);
             expect(page).toBeDefined();
             expect(page!).toContain('viewable-embed');
             expect(page!).toContain(marker);
@@ -276,8 +276,8 @@ describe('Both embed and direct link', () => {
             { 'diagram.excalidraw': SVG_EXAMPLE },
         );
 
-        expect(rendered.get('central')).toContain('viewable-embed');
-        expect(rendered.has('diagram')).toBe(true);
+        expect(rendered.get('central.md')).toContain('viewable-embed');
+        expect(rendered.has('diagram.excalidraw')).toBe(true);
     });
 });
 
@@ -487,7 +487,6 @@ describe('Obsidian internal-link conversion', () => {
 // ===========================================================================
 
 const BLOB_FILE = 'Deployment und Virtualisierung.excalidraw';
-const BLOB_SLUG = 'deployment-und-virtualisierung';
 
 describe('Excalidraw page with blob image source', () => {
     beforeEach(() => {
@@ -511,7 +510,7 @@ describe('Excalidraw page with blob image source', () => {
             options,
         );
 
-        const page = rendered.get(BLOB_SLUG);
+        const page = rendered.get(BLOB_FILE);
         expect(page).toBeDefined();
         expect(page!).not.toContain('blob:');
         expect(page!).toContain(expected);

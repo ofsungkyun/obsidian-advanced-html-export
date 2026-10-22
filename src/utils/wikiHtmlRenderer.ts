@@ -2,7 +2,8 @@ import { App, Component, TFile } from 'obsidian';
 import HtmlRenderer, { type ImageProcessingHooks, type RenderMarkdownResult } from './htmlRenderer';
 import { extractDiagramSources, noteLabelFromPath } from './exportSizeInstrumentation';
 import { LinkResolver } from './linkResolver';
-import { WikiLinkCollector } from './wikiLinkCollector';
+import { WikiExportContext } from './wikiExportContext';
+import { escapeHtml } from './htmlUtils';
 import { fillTemplate } from './templateUtils';
 import { hideLanguageIdentifiers, restoreLanguageIdentifiers, parseLanguagesString } from './codeBlockProcessor';
 import { utf8ByteLength } from './exportSizeReport';
@@ -49,24 +50,22 @@ export interface RenderPipelineHooks {
 export default class WikiHtmlRenderer extends HtmlRenderer {
     protected linkResolver: LinkResolver;
     protected pageList: PageInfo[] = [];
-    private collector: WikiLinkCollector;
-    private resolvableSlugs: Set<string> = new Set();
-
+    private context: WikiExportContext;
+    private resolvablePages = new Map<string, string>();
     constructor(app: App, component: Component, options: WikiRenderOptions) {
         super(app, component, options);
         this.linkResolver = new LinkResolver();
-        this.collector = new WikiLinkCollector(this.app, this.linkResolver);
+        this.context = new WikiExportContext(app);
     }
-
+    setExportContext(context: WikiExportContext): void {
+        this.context = context;
+    }
     setResolvablePages(pages: PageInfo[]): void {
-        this.resolvableSlugs = new Set(pages.map(p => p.slug));
-        this.linkResolver.setPageSlugResolver((rawTarget: string) => {
-            const file = this.collector.findFileByLink(rawTarget);
-            if (!file) return { slug: null, resolved: false };
-            const slug = this.linkResolver.getFileSlug(file);
-            return this.resolvableSlugs.has(slug)
-                ? { slug, resolved: true }
-                : { slug: null, resolved: false };
+        this.resolvablePages = new Map(pages.map(p => [p.path, p.slug]));
+        this.linkResolver.setPageSlugResolver((rawTarget, sourcePath) => {
+            const file = this.context.resolve(rawTarget, sourcePath);
+            const slug = file ? this.resolvablePages.get(file.path) : undefined;
+            return slug ? { slug, resolved: true } : { slug: null, resolved: false };
         });
     }
 
@@ -76,7 +75,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
      * - Convert Obsidian-rendered internal links to SPA data-page links
      * - Replace unresolvable links with wiki-link-missing spans
      */
-    protected normalizeRenderedLinks(el: HTMLElement): void {
+    protected normalizeRenderedLinks(el: HTMLElement, sourcePath = ''): void {
         el.querySelectorAll('a[data-page]').forEach((a) => {
             a.removeAttribute('target');
             a.removeAttribute('rel');
@@ -91,14 +90,14 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
             const target = href.split('#')[0].split('^')[0].trim();
             if (!target) return;
 
-            const file = this.collector.findFileByLink(target);
+            const file = this.context.resolve(target, sourcePath);
             if (!file) {
                 this.replaceWithMissingLink(a as HTMLAnchorElement, href);
                 return;
             }
 
-            const slug = this.linkResolver.getFileSlug(file);
-            if (this.resolvableSlugs.has(slug)) {
+            const slug = this.resolvablePages.get(file.path);
+            if (slug) {
                 const anchor = a as HTMLAnchorElement;
                 anchor.href = 'javascript:void(0)';
                 anchor.setAttribute('data-page', slug);
@@ -140,7 +139,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         hooks?: RenderPipelineHooks,
     ): Promise<string> {
         await hooks?.beforeResolveLinks?.();
-        const { content: resolvedContent } = this.linkResolver.resolveLinks(markdownContent);
+        const { content: resolvedContent } = this.linkResolver.resolveLinks(markdownContent, sourcePath);
 
         const languages = parseLanguagesString(this.settings.syntaxHighlightLanguages || '');
         const processedContent = this.settings.disableSyntaxHighlighting !== false
@@ -172,7 +171,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         await hooks?.afterImageProcessing?.(el);
 
         await hooks?.beforeNormalizeLinks?.(el);
-        this.normalizeRenderedLinks(el);
+        this.normalizeRenderedLinks(el, sourcePath);
 
         await hooks?.beforeHeadingIds?.(el);
         let html = el.innerHTML;
@@ -207,7 +206,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         const wikiTitle = options.wikiTitle || centralFile.basename;
         const defaultTheme = options.defaultTheme || 'light';
         const centralSlug = pageList.length > 0 ? pageList[0].slug : 'central';
-        const pagesJson = JSON.stringify(pageList);
+        const pagesJson = JSON.stringify(pageList).replace(/</g, '\\u003c');
         const imageRestoration = this.settings.enableImageDeduplication ? this.getImageRestorationScript() : '';
         const exportManifestJson = this.buildExportManifest(centralFile);
 
@@ -234,7 +233,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         }
 
         return fillTemplate(template, {
-            WIKI_TITLE: wikiTitle,
+            WIKI_TITLE: escapeHtml(wikiTitle),
             DEFAULT_THEME: defaultTheme,
             STYLES: styles,
             CONTENT: this.getWikiHtmlStructure(renderedPages, pageList),
@@ -312,7 +311,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
                         </button>
                     </div>
                     <nav class="wiki-breadcrumb" id="wiki-breadcrumb">
-                        <a href="javascript:void(0)" data-page="${centralSlug}">${centralTitle}</a>
+                        <a href="javascript:void(0)" data-page="${centralSlug}">${escapeHtml(centralTitle)}</a>
                     </nav>
                     
                     ${showInlineTOC || showThemeToggle ? `
@@ -371,9 +370,9 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
 
     private generatePageSections(renderedPages: Map<string, string>, pageList = this.pageList): string {
         return pageList.map(page => {
-            const html = renderedPages.get(page.slug) || '';
+            const html = renderedPages.get(page.path) || '';
             const isActive = page.slug === pageList[0].slug ? ' active' : '';
-            return `<div id="page-${page.slug}" class="wiki-page markdown-body${isActive}" data-title="${page.title}">${html}</div>`;
+            return `<div id="page-${page.slug}" class="wiki-page markdown-body${isActive}" data-title="${escapeHtml(page.title)}">${html}</div>`;
         }).join('\n');
     }
 
@@ -388,7 +387,7 @@ export default class WikiHtmlRenderer extends HtmlRenderer {
         manifest.author = (fm.author as string) || options.exportAuthor || '';
         if (fm.license) manifest.license = String(fm.license);
         if (fm.note) manifest.note = String(fm.note);
-        return JSON.stringify(manifest);
+        return JSON.stringify(manifest).replace(/</g, '\\u003c');
     }
 
     protected getImageRestorationScript(): string {

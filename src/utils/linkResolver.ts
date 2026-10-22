@@ -3,6 +3,7 @@ import { isExternalLink, markdownLinkPattern, wikiLinkPattern } from './linkSynt
 
 export interface LinkInfo {
     original: string;
+    offset: number;
     target: string;
     rawTarget: string;
     alias: string;
@@ -16,7 +17,7 @@ export interface PageSlugResolution {
 
 export class LinkResolver {
     private vaultFiles: Map<string, string> = new Map();
-    private pageSlugResolver: ((rawTarget: string) => PageSlugResolution) | null = null;
+    private pageSlugResolver: ((rawTarget: string, sourcePath: string) => PageSlugResolution) | null = null;
 
     /** Extensions that can be displayed inline by Obsidian's MarkdownRenderer */
     static readonly VIEWABLE_EXTENSIONS = [
@@ -33,7 +34,7 @@ export class LinkResolver {
         this.vaultFiles = files;
     }
 
-    setPageSlugResolver(resolver: (rawTarget: string) => PageSlugResolution): void {
+    setPageSlugResolver(resolver: (rawTarget: string, sourcePath: string) => PageSlugResolution): void {
         this.pageSlugResolver = resolver;
     }
 
@@ -89,6 +90,7 @@ export class LinkResolver {
 
     extractLinks(content: string): LinkInfo[] {
         const links: LinkInfo[] = [];
+        content = maskNonBodyLinks(content);
 
         // Match wiki links: both [[...]] and ![[...]]
         const wikiLinkRegex = wikiLinkPattern();
@@ -104,6 +106,7 @@ export class LinkResolver {
 
             links.push({
                 original: fullMatch,
+                offset: match.index,
                 target: this.slugify(target),
                 rawTarget: target,
                 alias: alias,
@@ -123,9 +126,10 @@ export class LinkResolver {
             }
 
             const target = this.resolvePath(href, '');
-            if (target) {
+            if (content[match.index - 1] !== '!') {
                 links.push({
                     original: fullMatch,
+                offset: match.index,
                     target: target,
                     rawTarget: href,
                     alias: alias,
@@ -166,82 +170,43 @@ export class LinkResolver {
         return slug;
     }
 
-    resolveLinks(content: string): { content: string; links: LinkInfo[] } {
+    resolveLinks(content: string, sourcePath = ''): { content: string; links: LinkInfo[] } {
         const links = this.extractLinks(content);
         let resolvedContent = content;
-
-        // First pass: protect image-embeds with placeholders to prevent
-        // substring collision when [[x]] appears inside ![[x]]
-        const embedPlaceholders: string[] = [];
-        for (const link of links) {
-            if (link.type === 'image-embed') {
-                const placeholder = `\x00EMBED${embedPlaceholders.length}\x00`;
-                embedPlaceholders.push(link.original);
-                resolvedContent = resolvedContent.replace(link.original, placeholder);
+        for (const link of [...links].sort((a, b) => b.offset - a.offset)) {
+            if (link.type === 'image-embed') continue;
+            let target = link.rawTarget;
+            if (link.type === 'markdown') {
+                try { target = decodeURIComponent(target.replace(/^<|>$/g, '')); } catch { /* Keep malformed escapes literal. */ }
             }
+            const resolution = this.pageSlugResolver?.(target, sourcePath);
+            const slug = resolution ? (resolution.resolved ? resolution.slug : null) : link.target;
+            const replacement = slug
+                ? `<a href="javascript:void(0)" data-page="${escapeHtml(slug)}">${escapeHtml(link.alias)}</a>`
+                : `<span class="wiki-link-missing" data-missing-target="${escapeHtml(target)}">${escapeHtml(link.alias)}</span>`;
+            resolvedContent = resolvedContent.slice(0, link.offset) + replacement + resolvedContent.slice(link.offset + link.original.length);
         }
-
-        // Second pass: replace wiki links with anchors or missing spans
-        for (const link of links) {
-            if (link.type === 'wiki') {
-                let replacement: string;
-
-                if (this.pageSlugResolver && link.rawTarget) {
-                    const resolution = this.pageSlugResolver(link.rawTarget);
-                    if (!resolution.resolved) {
-                        replacement =
-                            `<span class="wiki-link-missing" data-missing-target="${escapeHtml(link.rawTarget)}">${escapeHtml(link.alias)}</span>`;
-                    } else {
-                        const slug = resolution.slug ?? link.target;
-                        replacement =
-                            `<a href="javascript:void(0)" data-page="${escapeHtml(slug)}" style="cursor: pointer;">${escapeHtml(link.alias)}</a>`;
-                    }
-                } else {
-                    replacement =
-                        `<a href="javascript:void(0)" data-page="${escapeHtml(link.target)}" style="cursor: pointer;">${escapeHtml(link.alias)}</a>`;
-                }
-
-                resolvedContent = resolvedContent.replace(link.original, replacement);
-            }
-        }
-
-        // Third pass: restore image-embeds from placeholders
-        for (const original of embedPlaceholders) {
-            resolvedContent = resolvedContent.replace(/\x00EMBED\d+\x00/, original);
-        }
-
-        return {
-            content: resolvedContent,
-            links: links
-        };
+        return { content: resolvedContent, links };
     }
 
     findFileByLink(linkTarget: string, basePath: string = ''): string | null {
-        const resolvedPath = this.resolvePath(linkTarget, basePath);
-        const targetBasename = this.slugify(linkTarget.split('/').pop() || linkTarget);
-
-        for (const [path] of this.vaultFiles) {
-            const normalizedPath = path.toLowerCase().replace(/\.md$/i, '');
-            const normalizedResolved = resolvedPath.toLowerCase();
-
-            if (normalizedPath === normalizedResolved) {
-                return path;
-            }
-
-            if (normalizedPath.endsWith('/' + normalizedResolved)) {
-                return path;
-            }
-
-            const pathParts = path.split('/');
-            const fileName = pathParts[pathParts.length - 1];
-            const fileNameWithoutExt = fileName.replace(/\.md$/i, '');
-            const fileNameSlug = this.slugify(fileNameWithoutExt);
-
-            if (fileNameSlug === targetBasename) {
-                return path;
-            }
-        }
-
-        return null;
+        // Compatibility utility without an App. Never compare lossy slugs.
+        const target = linkTarget.replace(/\.md$/i, '');
+        const paths = [...this.vaultFiles.values()];
+        const direct = paths.find(path => path.replace(/\.md$/i, '') === target ||
+            path.replace(/\.md$/i, '') === `${basePath}/${target}`);
+        if (direct) return direct;
+        const matches = paths.filter(path => path.split('/').pop()?.replace(/\.md$/i, '') === target);
+        return matches.length === 1 ? matches[0] : null;
     }
+}
+
+/** Mask non-body text without changing offsets. Cached Obsidian links remain authoritative. */
+export function maskNonBodyLinks(content: string): string {
+    const mask = (text: string): string => text.replace(/[^\r\n]/g, ' ');
+    return content
+        .replace(/^\uFEFF?---[^\S\r\n]*\r?\n[\s\S]*?\r?\n---[^\S\r\n]*(?:\r?\n|$)/, mask)
+        .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*(?:\n|$)/gm, mask)
+        .replace(/(`+)([\s\S]*?)\1/g, mask)
+        .replace(/<!--[\s\S]*?-->/g, mask);
 }

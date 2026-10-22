@@ -1,3 +1,4 @@
+import { posix } from 'path';
 import { TFile } from 'obsidian';
 
 /**
@@ -68,6 +69,16 @@ export function mockAppWithFiles(
   };
 
   const metadataCache = {
+    // Host stub; ambiguous resolution tests explicitly stub the API result.
+    getFirstLinkpathDest: (target: string, sourcePath: string): TFile | null => {
+      const relative = posix.normalize(posix.join(posix.dirname(sourcePath), target));
+      for (const path of [relative, target]) {
+        const file = byPath.get(path + '.md') ?? byPath.get(path);
+        if (file) return file;
+      }
+      const matches = files.filter(f => f.name === target + '.md' || f.name === target || f.basename === target);
+      return matches.length === 1 ? matches[0] : null;
+    },
     getFileCache: (file: TFile) => {
       const fm = frontmatterByPath?.[file.path];
       return fm ? { frontmatter: fm } : null;

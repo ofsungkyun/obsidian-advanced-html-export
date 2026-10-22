@@ -1,3 +1,9 @@
+function escapeText(text) {
+    const element = document.createElement('span');
+    element.textContent = text;
+    return element.innerHTML;
+}
+
 // Wikifoo App Logic
 // Uses Preact Signals for reactive state management
 
@@ -24,7 +30,8 @@ const computedState = {
         if (!query) return state.notes;
         return state.notes.filter(n =>
             n.title.toLowerCase().includes(query) ||
-            n.slug.toLowerCase().includes(query)
+            n.slug.toLowerCase().includes(query) ||
+            n.path.toLowerCase().includes(query)
         );
     })
 };
@@ -73,7 +80,7 @@ function renderSidebar() {
     list.innerHTML = notes.map(note => ''
         + '<li>'
         + '<a href="javascript:void(0)" data-page="' + note.slug + '">'
-        + note.title
+        + escapeText(note.title)
         + '</a>'
         + '</li>'
     ).join('');
