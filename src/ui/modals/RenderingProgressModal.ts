@@ -47,7 +47,13 @@ export class RenderingProgressModal extends SvelteModal<boolean> {
     comp?.handleEvent?.(event);
   }
 
+  complete(): void {
+    this.finish(true);
+  }
+
   protected getFallbackResult(): boolean {
+    this.token.cancel();
+    this.pauseController.resume();
     return false;
   }
 }

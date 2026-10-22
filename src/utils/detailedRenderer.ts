@@ -119,6 +119,7 @@ export class DetailedWikiRenderer extends WikiHtmlRenderer {
                 timedOut: result.timedOut === true,
               }
             });
+            throw new Error(result.error ?? 'Markdown rendering failed');
           }
 
           const renderDuration = performance.now() - renderStartTime;

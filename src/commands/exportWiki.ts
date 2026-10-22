@@ -1,3 +1,4 @@
+import { runWithProgress } from '../utils/renderLifecycle';
 import { App, Notice, TFile } from 'obsidian';
 import type AdvancedHtmlExportPlugin from '../main';
 import { WikiRenderOptions } from '../utils/wikiHtmlRenderer';
@@ -64,7 +65,7 @@ export class ExportWikiCommand {
 
             // Phase 2/3: Preview and note selection
             const selectedNotes = await this.chooseNotes(collectedNotes, metrics);
-            if (!selectedNotes) {
+            if (!selectedNotes?.length) {
                 new Notice('Export cancelled.');
                 return;
             }
@@ -73,20 +74,18 @@ export class ExportWikiCommand {
             // Phase 4: Render selected notes with detailed progress
             const token = new CancellationToken();
             const pauseController = new PauseController();
-            const progressModal = new RenderingProgressModal(this.app, token, pauseController, metrics, selectedNotes);
+            const progressModal = new RenderingProgressModal(this.app, token, pauseController, orchestrator.getMetrics()!, selectedNotes);
             const ledger = new ExportSizeLedger();
             for (const note of selectedNotes) {
                 ledger.recordNoteSource(note.file.stat?.size ?? 0);
             }
 
-            const renderPromise = this.performRendering(orchestrator, selectedNotes, options, token, pauseController, progressModal, ledger);
-            const rendered = await progressModal.openAndAwait();
-            if (!rendered) {
-                new Notice('Export cancelled by user.');
-                return;
-            }
-
-            const { renderedPages, renderer } = await renderPromise;
+            const { renderedPages, renderer } = await runWithProgress(
+                progressModal, token, pauseController,
+                () => this.performRendering(orchestrator, selectedNotes, options, token, pauseController, progressModal, ledger)
+            );
+            const summary = orchestrator.getRenderSummary();
+            new Notice(`Rendering finished: ${summary.completed} completed, ${summary.failed} failed.`);
 
             // Record per-note artifacts (excluding inline images, which are
             // listed separately) for the largest-artifacts ranking.
@@ -115,6 +114,8 @@ export class ExportWikiCommand {
             }
             console.error('Error exporting wiki:', error);
             new Notice(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            collectingNotice.hide();
         }
     }
 

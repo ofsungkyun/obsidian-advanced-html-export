@@ -9,7 +9,7 @@
     "dev": "node scripts/dev.cjs",
     "dev:default": "node scripts/dev-default.cjs",
     "preview": "node scripts/copy-to-vault.cjs",
-    "build": "vite build && cp manifest.json dist/",
+    "build": "vite build && node -e \"require('node:fs').copyFileSync('manifest.json', 'dist/manifest.json')\"",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -1,3 +1,5 @@
+import { awaitRender, RenderTimeoutError } from './renderLifecycle';
+import { escapeHtml } from './htmlUtils';
 import { WikiExportContext } from './wikiExportContext';
 import { App, Component, TFile } from 'obsidian';
 import { LinkResolver } from './linkResolver';
@@ -55,7 +57,9 @@ export type ExportStage =
   | 'ready' 
   | 'rendering' 
   | 'completed' 
-  | 'cancelled';
+  | 'cancelled'
+  | 'failed'
+  | 'completed_with_errors';
 
 export class WikiExportOrchestrator {
   private app: App;
@@ -67,6 +71,14 @@ export class WikiExportOrchestrator {
   private collectedNotes: NoteInfo[] = [];
   private selectedNotes: NoteInfo[] = [];
   private metrics: ExportMetrics | null = null;
+  private selectionMade = false;
+  private succeeded: string[] = [];
+  private failures = new Map<string, string>();
+
+  getRenderSummary(): { completed: number; failed: number; selected: number; failures: Map<string, string> } {
+    return { completed: this.succeeded.length, failed: this.failures.size,
+      selected: this.selectedNotes.length, failures: new Map(this.failures) };
+  }
 
   constructor(app: App, _component: Component, options: WikiExportOptions) {
     this.app = app;
@@ -188,7 +200,13 @@ export class WikiExportOrchestrator {
    * Phase 2: Select which notes to export
    */
   setSelectedNotes(notes: NoteInfo[]): void {
-    this.selectedNotes = [...notes];
+    const collected = new Map(this.collectedNotes.map(note => [note.path, note]));
+    this.selectedNotes = [...new Set(notes.map(note => note.path))].map(path => {
+      const note = collected.get(path);
+      if (!note) throw new Error(`Note was not collected: ${path}`);
+      return note;
+    });
+    this.selectionMade = true;
     this.calculateMetrics();
   }
 
@@ -207,6 +225,8 @@ export class WikiExportOrchestrator {
     }
 
     this.stage = 'rendering';
+    this.succeeded = [];
+    this.failures.clear();
     debugLogger.startPhase('renderNotesWithProgress', {
       noteCount: this.selectedNotes.length
     });
@@ -217,7 +237,14 @@ export class WikiExportOrchestrator {
     renderer.setResolvablePages(this.selectedNotes);
 
     // Subscribe to renderer events
-    renderer.onRenderEvent(onEvent);
+    let acceptingEvents = true;
+    let completionEvent: RenderEvent | undefined;
+    renderer.onRenderEvent(event => {
+      if (!acceptingEvents) return;
+      if (event.type === 'note_complete') completionEvent = event;
+      else onEvent(event);
+    });
+    const unsubscribeCancel = token.onCancel(() => pauseController.resume());
 
     try {
       for (let i = 0; i < this.selectedNotes.length; i++) {
@@ -228,31 +255,42 @@ export class WikiExportOrchestrator {
 
         // Check for pause (between notes)
         await pauseController.waitIfPaused();
+        token.throwIfCancelled();
+        completionEvent = undefined;
 
         try {
-          const html = await renderer.renderPageWithProgress(noteInfo.file, token, pauseController);
+          const html = await awaitRender(
+            renderer.renderPageWithProgress(noteInfo.file, token, pauseController, noteInfo), token, pauseController);
+          token.throwIfCancelled();
           renderedPages.set(noteInfo.path, html);
+          this.succeeded.push(noteInfo.path);
+          onEvent(completionEvent ?? { type: 'note_complete', timestamp: Date.now(), notePath: noteInfo.path, noteTitle: noteInfo.title });
         } catch (error) {
           if (error instanceof CancellationError) {
             this.stage = 'cancelled';
             throw error;
           }
-          // Log error but continue with other notes
+          const message = error instanceof Error ? error.message : String(error);
+          this.failures.set(noteInfo.path, message);
+          renderedPages.set(noteInfo.path, `<p class="wiki-render-error">This note could not be rendered: ${escapeHtml(message)}</p>`);
+          // Ordinary failures get an explicit error page, preserving link integrity.
           console.error(`Error rendering note ${noteInfo.path}:`, error);
           onEvent({
             type: 'note_error',
             timestamp: Date.now(),
             notePath: noteInfo.path,
             noteTitle: noteInfo.title,
-            details: { error: error instanceof Error ? error.message : String(error) }
+            details: { error: message, terminal: true }
           });
+          // A timed-out renderer can still finish later; stop the export rather than reuse it.
+          if (error instanceof RenderTimeoutError) throw error;
         }
 
         // Yield to UI thread
         await yieldToUI();
       }
 
-      this.stage = 'completed';
+      this.stage = this.failures.size ? 'completed_with_errors' : 'completed';
       debugLogger.endPhase();
       debugLogger.printSummary();
 
@@ -260,9 +298,14 @@ export class WikiExportOrchestrator {
     } catch (error) {
       if (error instanceof CancellationError) {
         this.stage = 'cancelled';
+      } else {
+        this.stage = 'failed';
       }
       debugLogger.endPhase();
       throw error;
+    } finally {
+      acceptingEvents = false;
+      unsubscribeCancel();
     }
   }
 
@@ -270,7 +313,7 @@ export class WikiExportOrchestrator {
    * Calculate export metrics based on collected notes
    */
   private calculateMetrics(): void {
-    const notes = this.selectedNotes.length > 0 ? this.selectedNotes : this.collectedNotes;
+    const notes = this.selectionMade ? this.selectedNotes : this.collectedNotes;
     
     const totalDiagrams = notes.reduce((sum, note) => sum + note.estimatedDiagrams, 0);
     const notesByDepth = new Map<number, number>();
@@ -301,5 +344,8 @@ export class WikiExportOrchestrator {
     this.collectedNotes = [];
     this.selectedNotes = [];
     this.metrics = null;
+    this.selectionMade = false;
+    this.succeeded = [];
+    this.failures.clear();
   }
 }

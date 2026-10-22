@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { RenderingProgressStore, type RenderingProgressDeps } from './renderingProgress.svelte';
+import { RenderingProgressStore, type RenderingProgressDeps } from './renderingProgressStore.svelte';
 import type { ExportMetrics } from '../utils/wikiExportOrchestrator';
 import type { CancellationToken } from '../utils/cancellationToken';
 import type { PauseController } from '../utils/pauseController';
@@ -58,7 +58,7 @@ describe('RenderingProgressStore', () => {
     expect(store.completedNotes).toHaveLength(1);
     expect(store.isCompleted).toBe(false);
 
-    store.handleEvent(noteStart());
+    store.handleEvent({ ...noteStart(), notePath: 'second.md' });
     store.handleEvent(noteComplete());
     expect(store.completedNotes).toHaveLength(2);
     expect(store.isCompleted).toBe(true);
@@ -110,5 +110,39 @@ describe('RenderingProgressStore', () => {
     store.cancel();
     store.handleEvent({ type: 'diagram_complete', timestamp: 3 });
     expect(store.currentNote?.diagrams.processed).toBe(0);
+  });
+});
+
+
+describe('failure and cancellation settlement', () => {
+  it('counts a terminal failure once, without counting warnings as failures', () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    const store = new RenderingProgressStore(deps);
+    store.handleEvent(noteStart());
+    store.handleEvent({ type: 'note_error', timestamp: 1, notePath: 'note.md', details: { error: 'warning' } });
+    expect(store.failedNotes).toHaveLength(0);
+    store.handleEvent(noteComplete());
+    const error: RenderEvent = { type: 'note_error', timestamp: 2, notePath: 'second.md', details: { error: 'failed', terminal: true } };
+    store.handleEvent(error);
+    store.handleEvent(error);
+    expect(store.completedNotes).toHaveLength(1);
+    expect(store.failedNotes).toHaveLength(1);
+    expect(store.overallProgress).toBe(100);
+    vi.runAllTimers();
+    expect(deps.onComplete).toHaveBeenCalledOnce();
+    store.dispose();
+    vi.useRealTimers();
+  });
+  it('releases pause when cancelled', () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    const store = new RenderingProgressStore(deps);
+    store.togglePause();
+    store.cancel();
+    expect(deps.pauseController.resume).toHaveBeenCalledOnce();
+    expect(store.isPaused).toBe(false);
+    store.dispose();
+    vi.useRealTimers();
   });
 });

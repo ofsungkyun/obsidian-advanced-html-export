@@ -20,12 +20,13 @@ export class CancellationToken {
     return this._cancelled;
   }
 
-  onCancel(callback: () => void): void {
+  onCancel(callback: () => void): () => void {
     if (this._cancelled) {
       callback();
     } else {
       this._callbacks.push(callback);
     }
+    return () => { this._callbacks = this._callbacks.filter(cb => cb !== callback); };
   }
 
   throwIfCancelled(): void {

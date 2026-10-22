@@ -28,6 +28,8 @@ export interface RenderingProgressDeps {
  */
 export class RenderingProgressStore {
   completedNotes = $state<CompletedNote[]>([]);
+  failedNotes = $state<Array<{ path: string; title: string; error: string }>>([]);
+  private settledPaths = new Set<string>();
   currentNote = $state<CurrentNoteProgress | null>(null);
   isPaused = $state(false);
   isCancelled = $state(false);
@@ -42,7 +44,7 @@ export class RenderingProgressStore {
     const total = this.deps.metrics.totalNotes;
     if (total <= 0) return 0;
 
-    const notesProgress = this.completedNotes.length / total;
+    const notesProgress = (this.completedNotes.length + this.failedNotes.length) / total;
     if (!this.currentNote) {
       return Math.round(notesProgress * 100);
     }
@@ -59,6 +61,7 @@ export class RenderingProgressStore {
   private readonly startTime = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
   private warningTimer: ReturnType<typeof setTimeout> | null = null;
+  private finishTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(deps: RenderingProgressDeps) {
     this.deps = deps;
@@ -72,6 +75,7 @@ export class RenderingProgressStore {
 
   /** Stops all timers. Call when the view unmounts. */
   dispose(): void {
+    if (this.finishTimer !== null) clearTimeout(this.finishTimer);
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
@@ -107,6 +111,13 @@ export class RenderingProgressStore {
         break;
       case 'note_error':
         this.setWarning(`Error rendering ${event.noteTitle}: ${event.details?.error}`);
+        if (event.details?.terminal === true && event.notePath && !this.settledPaths.has(event.notePath)) {
+          this.settledPaths.add(event.notePath);
+          this.failedNotes = [...this.failedNotes, { path: event.notePath,
+            title: event.noteTitle ?? event.notePath, error: String(event.details.error) }];
+          this.currentNote = null;
+          this.checkCompleted();
+        }
         break;
       case 'diagram_start':
         this.update('diagrams', { total: numberDetail(event, 'totalDiagrams') });
@@ -157,20 +168,29 @@ export class RenderingProgressStore {
   cancel(): void {
     this.isCancelled = true;
     this.deps.token.cancel();
+    this.deps.pauseController.resume();
+    this.isPaused = false;
     this.warning = 'Cancelling... Please wait for current operation to complete.';
-    setTimeout(() => this.deps.onCancel(), 500);
+    this.finishTimer = setTimeout(() => this.deps.onCancel(), 500);
   }
 
   private handleNoteComplete(event: RenderEvent): void {
     const current = this.currentNote;
     if (!current) return;
+    const path = event.notePath ?? current.path;
+    if (this.settledPaths.has(path)) return;
+    this.settledPaths.add(path);
 
     this.completedNotes = [...this.completedNotes, completedNoteFrom(current, event)];
     this.currentNote = null;
 
-    if (this.completedNotes.length === this.deps.metrics.totalNotes && !this.isCancelled) {
+    this.checkCompleted();
+  }
+
+  private checkCompleted(): void {
+    if (this.settledPaths.size === this.deps.metrics.totalNotes && !this.isCancelled && !this.isCompleted) {
       this.isCompleted = true;
-      setTimeout(() => this.deps.onComplete(), 1000);
+      this.finishTimer = setTimeout(() => this.deps.onComplete(), 1000);
     }
   }
 

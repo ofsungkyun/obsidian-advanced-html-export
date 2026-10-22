@@ -5,7 +5,7 @@
   import ProgressBar from './ProgressBar.svelte';
   import Icon from './Icon.svelte';
   import { truncateTitle } from '../utils/renderProgress';
-  import { RenderingProgressStore } from './renderingProgress.svelte';
+  import { RenderingProgressStore } from './renderingProgressStore.svelte';
 
   let {
     metrics,
@@ -77,6 +77,15 @@
       {/each}
     </div>
   </details>
+
+  {#if store.failedNotes.length}
+    <details class="mb-3">
+      <summary>Failed notes ({store.failedNotes.length})</summary>
+      {#each store.failedNotes as note}
+        <p>{note.title}: {note.error}</p>
+      {/each}
+    </details>
+  {/if}
 
   <section data-tags="rp-current" class="mt-3 p-2.5 bg-obsidian-alt rounded">
     <div class="font-semibold text-obsidian mb-2 whitespace-nowrap overflow-hidden text-ellipsis">
